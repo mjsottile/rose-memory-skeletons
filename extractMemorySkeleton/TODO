@@ -1,0 +1,220 @@
+
+I. Memory Skeletonizer
+----------------------
+
+1. More tests:
+
+a) [DONE; all test compile without warnings or errors under "gcc -c *.c"]
+
+C: add minimal C test programs for:
+ * do-while
+ * switch
+ * if .. then .. else
+ * array syntax: 1d, 2d, 3d
+ * struct field access: arrow and dot
+ * function calls
+ * declaration initializer
+ * function pointer reads/writes
+
+b) [Matt] Fortran: add variants of the above where they exist
+
+c) C++: ignore C++ for now
+
+[DONE] 3. RBSor example: why are some things ignored and not removed?
+
+4. Pragma-driven skeletonizing
+
+[DONE; incorporated into replaceWithAbstractReadWrites] 5. M: Handle reads in
+conditionals (currently would be done twice: once in conditional, once in
+body). Care should be taken to only insert reader/write calls when the
+conditional is to be replaced with a branch predictor.
+
+[DONE] 6. M: Compensate for over-counting of reads in assignment statements (esp. array refs; see array-access-1d.c).
+
+[DONE] [VERIFIED TO BE DUPE OF #10 - ASSIGNOPS TEST WORKS FINE] 7. H: AssignOps not being removed in some cases (see rbsor.c:iterate) (might be instance of #10)
+
+[DONE] 8. M: Function calls not being preserved when they ought to (see
+rbsor.c:sor)
+
+[DONE] 9. L: During code insertion pass: if keep is true, check whether any of the compound statement's sub-statements are generated (or themselves contain generated code); if not, remove it.
+
+[DONE] 10. H: Missing some statements toward the end of basic block (see array-malloc-1d.c)
+
+[DONE] [PROGRESS: works for malloc case but still deleting local fun calls] 11. H: Function calls not generating reads/writes correctly (see malloc, free in array-malloc-1d.c). May be related #8.
+
+[DONE] 12. M: Loop increment not processed at all (is SgExpression, so is missed by collectReadWriteRefs).
+  (IDEA: this is equivalent to no increment, and putting the increment as the
+         last statement in the loop body.  Perhaps we should do this
+         transformation first? )
+
+[PARTIAL: Uniform distribution presumed] 13. L: Branch predictors to replace
+conditionals where appropriate (i.e., when the conditional doesn't contain
+object variables).
+
+[DONE] 14. H: ArrowExps and DotExps need to be treated similarly to ArrayPntrRefExps (but slightly differently). Likely a need for mutuality between them.
+
+[DONE via #17] 15. Move r/w replacement for for-loop initializers to before loop.
+
+[DONE] 16. H: Loop control elements should be left alone, then #17 makes handling them covered by #5.
+
+[DONE] 17. Rewrite for-loops:
+
+    for ( init ; test ; inc )
+      body
+
+    ==>
+
+    init;
+    while ( true ) {
+        if ( test ) {
+            body [ continue / goto step ];
+        step:
+            inc;
+        } else {
+            break;
+        }
+    }
+
+[DONE] 18. Never delete non-compound control statements (return, continue, break, etc.)
+
+[DONE] [PARTIAL: function calls now handled in collectReadWriteRefsInExpression, but transformation not right (seems to insert aliases?)] 19. Examine lulesh.cc "obj.method(inc) = expr(inc);" statements being left behind. Should be left behind, if function call is lvalue.
+
+[DONE] 20. Normalize decls with initializers to naked decls with separate initalizer statements;
+
+[DONE] 21. Don't add read/writer calls for constant/literal expressions.
+
+[DONE for return types that are int-like, unsigned int -like, float-like,
+pointer, void; leaves compile-time constants alone] 22. Some control flow
+containing expressions needs to be normalized, e.g.:
+
+    return (2*x);
+
+    ===>
+
+    reader(x);
+    return 0;
+
+    Alternatively, we could leave them alone (i.e. not add reader(x);).
+
+[DONE] 23. Currently, function calls end up as arguments to reader, e.g.:
+
+    d = malloc(sizeof(double)*100);
+
+from tests/simple/array-malloc-1d.c becomes:
+
+    writer(d);
+    reader(malloc((sizeof(double ) * 100)));
+
+and
+
+    y = sqrt(d[i][i+1][k]);
+
+from tests/simple/rose_array-access-3d.c becomes:
+
+    writer(y);
+    writer(d);
+    reader(sqrt(d[i][i + 1][k]));
+
+In general, the transformation should be:
+
+    FunctionCall func args
+        | func \elem interesting = leave alone
+        | otherwise              = replace (call, accesses)
+                                   with [(arg, accesses) | arg <- args]
+                                   in access map
+
+where interesting includes system calls like malloc, free, and any subject
+function.
+
+[DONE] 23a. Not sure where that extra writer(d) above (second example) comes
+from.
+
+[DONE] 23b. Transformation above will work as-is for void functions, but will
+yield the following for malloc:
+
+    writer(d);
+    malloc((sizeof(double ) * 100));
+
+We need to do this test for assignment operations that make calls.
+
+[DONE] 24. Infer loop indices for while and do-while statements; spec.:
+
+   [ i | rs <- collectReads(loop_cond)
+       , ws <- collectWrites(loop_body)
+       , r <- rs
+       , r `elem` ws
+       , i <- isVarRef r
+       ]
+
+25. #22 introduces division-by-zero potential for int-like return types, as we
+replace those return statements with "return 0".
+
+[WON'T DO; SEE #5] 26. Do #5 in second traversal, remove check for empty
+compounds, and then do a final postorder traversal, removing empty statements / expressions.
+
+Wrinkle: how to handle replacing an expression? Mostlikely by replacing the
+statement in which it occurs, which may require merging replacements, probably
+by applying them in sequence.
+
+[FIXED: see #28] 27. Sometimes we keep an assignment statement when we
+shouldn't. Could be dominance logic in inference of access signature, could be
+statement is marked keep (loop index? function call?)
+
+[DONE: exclude member functions, any function heads (or parts thereof), or
+function calls outright from r/w access markings. Covers #27 too], 28.
+Determine and implement correct skeletonization for object method or struct
+member function calls (likely related to #27). Currently, we're messing it up.
+
+II. FM Tools
+------------
+
+Goal: replace nested loop bounds with those derived from polyhedral analysis
+
+1. Investigate available polyhedral analyses, evaluate for fitness to integrate with our transformation:
+
+ * PolyOpt/C: http://www.cse.ohio-state.edu/~pouchet/software/polyopt/
+   * Note: set ROSE_ROOT=$ROSEINSTALL else the installer won't find ROSE
+   * Restricts attention to for-loops whose iterators are affine
+ * PolyhedralModel:
+   * In $ROSEINSTALL/projects, several usage examples exist
+   * Not clear if installed in vanilla ROSE install
+ * Parma Polyhedral Library (PPL): http://bugseng.com/products/ppl
+   * There is a "--with-ppl[=DIR]" flag to $ROSEINSTALL/configure
+ * RosePolly:
+   * In $ROSEINSTALL/projects, no usage examples found
+   * Not clear if installed in vanilla ROSE install
+
+2. Try out best of the above.
+
+3. Find examples (first look in the above).
+
+III. Pragma Functionality
+-------------------------
+
+HIGH.
+
+IV. MPI Skeletonizer
+--------------------
+
+HIGH 1. Fix C++ problems.
+
+HIGH 2. Test on Mantevo "MiniFE" code, not "MiniMD".
+
+V. Scalability tests
+--------------------
+
+In terms of:
+
+ * Time to generate vs code "complexity" metric
+ * Size of code that makes translator explode/choke
+
+VI. Valgrind / Dynamic Instrumentation
+--------------------------------------
+
+Validation of skeletons
+
+ * PIN
+ * Dyninst
+ * traces (Matt's thesis, in repo somewhere); surrounds MPI calls and spits
+   call info into log file
+

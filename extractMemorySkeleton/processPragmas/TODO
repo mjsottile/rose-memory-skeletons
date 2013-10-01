@@ -1,0 +1,41 @@
+
+* improve "#pragma skel loop iterate":
+
+  - 'iterate atleast(N)' and 'iterate exactly(N)' may not execute N times if
+    a loop contains 'break'.
+    - Add a run-time warning to code when we break when not atleast/exactly.
+    - Document this.
+
+* add more tests.
+
+* pragma skel condition prob
+
+  Note that
+    #pragma skel condition prob ( 0 )
+  will never execute the branch.  But that
+    #pragma skel condition prob ( 1 )
+  may not *always* execute the loop.  To get this "just right" involves
+  complicating the code a bit, is this worth it?
+
+* expand applicability of "#pragma skel initializer"
+  - work for nested arrays
+  - work for statically allocated arrays
+    - currently creates bad code on these.
+    [priority=lowest]
+
+* remove ROSE warnings, as possible.
+
+  - Not feasible?  Will change with the version of ROSE.
+
+* add pragmas
+  - '#pragma initializer const(e)'
+     work on other declarations (only pointers or anything?).
+
+* support floating point constants in pragmas.
+  - ROSE does not support these in its C expression parser.
+
+* generalize "#pragma skel initializer repeat(i)"
+  - write as "#pragma skel initializer(k:e)"
+    where 'e' is a C expression that allows for references to 'k'
+
+* generalize "#pragma skel condition" to allow for any predicate, not just rand.

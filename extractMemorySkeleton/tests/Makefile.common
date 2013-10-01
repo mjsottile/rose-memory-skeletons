@@ -1,0 +1,43 @@
+asrcdir=$(realpath $(srcdir))
+
+# Borrowed from extractMPISkeleton; needs to be updated
+EXTRA_DIST = \
+	simple/files \
+	simple/rose_test.c.expected \
+	simple/test.c
+
+DIRS=$(foreach file, ${EXTRA_DIST}, $(dir ${file}))
+
+# These, we expect to fail, in anti-tests/ for now:
+#    t15 \
+#    t18 \
+# TODO: We need to add more like this.
+
+MARKS=$(addsuffix testmark, ${DIRS})
+LISTS=$(filter %files, ${EXTRA_DIST})
+ALL_EXPECTED=$(filter %.expected, ${EXTRA_DIST})
+TEST_SRCS_C=$(filter %.c, ${EXTRA_DIST})
+TEST_SRCS_CC=$(filter %.cc, ${EXTRA_DIST})
+TEST_SRCS=${TEST_SRCS_C} ${TEST_SRCS_CC}
+ALL_OUTS=$(foreach file, ${TEST_SRCS}, $(addprefix $(dir ${file}), $(addprefix rose_, $(notdir ${file}))))
+ALL_OBJS=$(addsuffix .o, $(basename ${ALL_OUTS}))
+
+SKFLAGS=
+
+%/testmark: %/files
+	(cd $* && ${EXEC} ${SKFLAGS} `cat files` && touch $(@F))
+
+%/testmark-outline: %/files
+	(cd $* && ${EXEC} ${SKFLAGS} -skel:o `cat files` && touch $(@F))
+
+%.o: %.c
+	${CC} -I$(asrcdir)/../mpi-fakeheader -c -o $@ $<
+
+%.o: %.cc
+	${CXX} -I$(asrcdir)/../mpi-fakeheader -c -o $@ $<
+
+%.comp: % %.expected
+	- diff -w $?
+
+show:
+	@echo $($(VALUE))              # note: this expands!
